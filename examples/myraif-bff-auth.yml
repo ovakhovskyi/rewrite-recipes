@@ -1,0 +1,7 @@
+type: specs.openrewrite.org/v1beta/recipe
+name: dev.myraif.rewrite.ConfigureBffAuthAvroTrust
+displayName: Configure Avro trust for myraif-bff-auth
+description: Register the package used by the authentication event schemas.
+recipeList:
+  - dev.myraif.rewrite.ConfigureAvroTrust:
+      trustedPackage: ua.aval.clients.diiagateway.myraifbffauth.avro

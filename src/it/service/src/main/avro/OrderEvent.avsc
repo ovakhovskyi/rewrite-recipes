@@ -1,0 +1,2 @@
+{"type":"record","name":"OrderEvent","namespace":"example.orders.avro",
+ "fields":[{"name":"id","type":"long"}]}
