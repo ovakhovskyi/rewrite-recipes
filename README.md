@@ -10,11 +10,7 @@ Maven-проект OpenRewrite-рецепта для миграции Spring Boo
 mvn clean install
 ```
 
-Координаты JAR — `dev.myraif.rewrite:rewrite-avro-trust:1.0.2`. Рецепт компилируется в байткод Java 17. Если удобнее использовать готовый JAR из архива, выполни из этой же директории:
-
-```bash
-mvn install:install-file -Dfile=dist/rewrite-avro-trust-1.0.2.jar -DpomFile=pom.xml
-```
+Для сборки и запуска рецепта нужен JDK 25. Команда `mvn -version` показывает, какой JDK использует Maven. `mvn clean install` устанавливает JAR с координатами `org.arazei:openrewrite:1.0-SNAPSHOT` и байткодом Java 25.
 
 ## Запуск в сервисе
 
@@ -22,7 +18,7 @@ mvn install:install-file -Dfile=dist/rewrite-avro-trust-1.0.2.jar -DpomFile=pom.
 
 ```bash
 mvn org.openrewrite.maven:rewrite-maven-plugin:6.25.0:dryRunNoFork \
-  -Drewrite.recipeArtifactCoordinates=dev.myraif.rewrite:rewrite-avro-trust:1.0.2 \
+  -Drewrite.recipeArtifactCoordinates=org.arazei:openrewrite:1.0-SNAPSHOT \
   -Drewrite.activeRecipes=dev.myraif.rewrite.ConfigureAvroTrust \
   '-Drewrite.additionalPlainTextMasks=**/*.avsc' \
   -Drewrite.exportDatatables=true
@@ -37,7 +33,7 @@ mvn org.openrewrite.maven:rewrite-maven-plugin:6.25.0:dryRunNoFork \
 - Каждый Maven-модуль проверяется отдельно. Нужен обычный JAR `org.apache.avro:avro:1.12.2` на compile и runtime classpath. Поддерживаются транзитивные зависимости и версии из dependency management. Другие версии, включая 1.11.5 и 1.12.1, пропускаются.
 - В `src/main/java` должен быть ровно один верхнеуровневый класс с `@SpringBootApplication`. Его имя произвольно. Базовый пакет берётся из Java-декларации.
 - Рецепт ищет определения record, enum и fixed в `.avsc` под `src/` каждого модуля, включая `src/avro`, `src/main/avro` и произвольные подкаталоги. Поиск также поддерживает производственный `sourceDirectory` из `avro-maven-plugin` и распознаёт Java-модели с `@AvroGenerated`. Доверенные пакеты берутся из подтверждённых namespace. Каталоги `src/test`, `src/it` и `src/testFixtures` исключены.
-- Результат — `com.example.orders.config.AvroTrustInitializer` и его регистрация в `src/main/resources/META-INF/spring.factories`. Инициализатор дополняет действующий глобальный предикат Avro. Подпакеты и соседние пакеты автоматически не разрешаются.
+- Результат — `com.example.orders.config.AvroTrustInitializer` и его регистрация в `src/main/resources/META-INF/spring.factories`. Инициализатор дополняет действующий глобальный предикат Avro проверками точного совпадения пакетов.
 - Существующие регистрации и комментарии сохраняются. Для ранее сгенерированного класса рецепт обновляет список пакетов и при необходимости восстанавливает регистрацию. Другая реализация в целевом классе, повторяющийся ключ инициализатора и неоднозначное приложение приводят к пропуску модуля. Сравнение с ожидаемым исходником учитывает различия CRLF/LF и обрамляющие пробелы. Другие пользовательские изменения трактуются как конфликт.
 - Причины пропуска экспортируются в таблицу `ConfigureAvroTrust$Decisions` в каталоге отчётов плагина при `-Drewrite.exportDatatables=true`. Проект рецепта и целевой сервис используют отдельные POM. Рецепт не меняет зависимости сервиса.
 

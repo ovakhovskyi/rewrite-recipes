@@ -8,7 +8,7 @@ import tempfile
 
 PLUGIN = "org.openrewrite.maven:rewrite-maven-plugin:6.25.0"
 RECIPE = "dev.myraif.rewrite.ConfigureAvroTrust"
-COORDINATES = "dev.myraif.rewrite:rewrite-avro-trust:1.0.2"
+COORDINATES = "org.arazei:openrewrite:1.0-SNAPSHOT"
 HERE = Path(__file__).resolve().parent
 APP = Path("src/main/java/example/orders")
 FACTORIES = Path("src/main/resources/META-INF/spring.factories")
@@ -102,8 +102,10 @@ def fixture(root):
 def verify(root, mvn, release):
     fixture(root)
     args = [mvn, "-B", "-ntp", f"-Dmaven.compiler.release={release}"]
-    run = [PLUGIN + ":run", "-Drewrite.recipeArtifactCoordinates=" + COORDINATES,
-           "-Drewrite.activeRecipes=" + RECIPE, "-Drewrite.additionalPlainTextMasks=**/*.avsc"]
+    recipe_options = ["-Drewrite.recipeArtifactCoordinates=" + COORDINATES,
+                      "-Drewrite.additionalPlainTextMasks=**/*.avsc"]
+    active_recipe = "-Drewrite.activeRecipes=" + RECIPE
+    run = [PLUGIN + ":run", *recipe_options, active_recipe]
     before = snapshot(root)
     subprocess.run(args + run, cwd=root, check=True)
     after = snapshot(root)
@@ -129,13 +131,13 @@ def verify(root, mvn, release):
     namespace = "ua.aval.clients.diiagateway.myraifbffauth.avro"
     for path in (app / "src/avro/OrderEvent.avsc", app / "src/test/java/example/orders/OrderEventTest.java"):
         path.write_text(path.read_text().replace("example.orders.avro", namespace))
-    options = ["-pl", "service", *run[1:]]
+    options = ["-pl", "service", *recipe_options, active_recipe]
     subprocess.run(args + options + [PLUGIN + ":dryRunNoFork"], cwd=custom, check=True)
     patch, = custom.rglob("rewrite.patch")
     assert namespace in patch.read_text(), "Missing external namespace in dry run"
     subprocess.run(args + options + [PLUGIN + ":runNoFork"], cwd=custom, check=True)
 
-    # Existing generated source gains exact packages from other src directories without duplicating registration.
+    # Discover an additional production namespace from another src directory.
     second_namespace = "example.custom.extra"
     second_schema = app / "src/events/example/Extra.avsc"
     second_schema.parent.mkdir(parents=True)
@@ -144,9 +146,31 @@ def verify(root, mvn, release):
     test_schema.parent.mkdir(parents=True)
     test_schema.write_text('{"type":"record","name":"Fixture","namespace":"example.test.fixture","fields":[]}')
     registration = (app / FACTORIES).read_bytes()
+
+    config = custom / "selected-package.yml"
+    config.write_text(f"""type: specs.openrewrite.org/v1beta/recipe
+name: test.fixture.SelectAvroPackage
+displayName: Select an Avro package
+description: Configure trust for a single production package.
+recipeList:
+  - {RECIPE}:
+      trustedPackage: {namespace}
+""")
+    before = snapshot(custom)
+    subprocess.run(args + ["-pl", "service", *recipe_options, PLUGIN + ":runNoFork",
+                           "-Drewrite.activeRecipes=test.fixture.SelectAvroPackage",
+                           f"-Drewrite.configLocation={config}"], cwd=custom, check=True)
+    assert snapshot(custom) == before, "Explicit package selection changed the configured trust"
+
+    # Migrate the old inline checks while adding the detected package to the same registration.
+    legacy = (HERE / "legacy/AvroTrustInitializer.java").read_text()
+    (app / INITIALIZER).write_text(legacy.replace("example.orders.avro", namespace))
     subprocess.run(args + options + [PLUGIN + ":runNoFork"], cwd=custom, check=True)
     initializer = (app / INITIALIZER).read_text()
-    assert all(('"' + name + '"') in initializer for name in (namespace, second_namespace))
+    for index, name in enumerate(sorted((namespace, second_namespace)), start=1):
+        assert f'private static final String TRUSTED_PACKAGE_{index} = "{name}";' in initializer
+        assert f'TRUSTED_PACKAGE_{index}.equals(packageName)' in initializer
+    assert initializer.count("type.getPackageName()") == 1
     assert "example.test.fixture" not in initializer
     assert (app / FACTORIES).read_bytes() == registration
     before = snapshot(custom)
