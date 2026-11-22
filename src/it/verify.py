@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 
 PLUGIN = "org.openrewrite.maven:rewrite-maven-plugin:6.25.0"
-RECIPE = "dev.myraif.rewrite.ConfigureAvroTrust"
+RECIPE = "io.github.arazei.rewrite.recipes.ConfigureAvroTrust"
 COORDINATES = "org.arazei:openrewrite:1.0-SNAPSHOT"
 HERE = Path(__file__).resolve().parent
 APP = Path("src/main/java/example/orders")
@@ -102,8 +102,7 @@ def fixture(root):
 def verify(root, mvn, release):
     fixture(root)
     args = [mvn, "-B", "-ntp", f"-Dmaven.compiler.release={release}"]
-    recipe_options = ["-Drewrite.recipeArtifactCoordinates=" + COORDINATES,
-                      "-Drewrite.additionalPlainTextMasks=**/*.avsc"]
+    recipe_options = ["-Drewrite.recipeArtifactCoordinates=" + COORDINATES]
     active_recipe = "-Drewrite.activeRecipes=" + RECIPE
     run = [PLUGIN + ":run", *recipe_options, active_recipe]
     before = snapshot(root)
@@ -123,15 +122,22 @@ def verify(root, mvn, release):
     assert (service / FACTORIES).read_text().splitlines() == [
         "org.springframework.context.ApplicationContextInitializer=example.orders.config.AvroTrustInitializer"]
     assert snapshot(root)[Path("service") / INITIALIZER] == after[Path("service") / INITIALIZER]
-    # Discover a different namespace before Maven generates Java, using the direct recipe.
-    custom = root / "external-namespace"
+    # Before Java generation, discover schemas without masks when Maven and Git have different roots.
+    repo = root / "external-namespace"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    custom = repo / "reactor"
     custom.mkdir()
     fixture(custom)
     app = custom / "service"
     namespace = "ua.aval.clients.diiagateway.myraifbffauth.avro"
-    for path in (app / "src/avro/OrderEvent.avsc", app / "src/test/java/example/orders/OrderEventTest.java"):
+    (app / "src/avro").rename(app / "schemas")
+    pom = app / "pom.xml"
+    pom.write_text(pom.read_text().replace("<sourceDirectory>src/avro</sourceDirectory>",
+                                          "<sourceDirectory>${project.basedir}/schemas</sourceDirectory>"))
+    for path in (app / "schemas/OrderEvent.avsc", app / "src/test/java/example/orders/OrderEventTest.java"):
         path.write_text(path.read_text().replace("example.orders.avro", namespace))
-    options = ["-pl", "service", *recipe_options, active_recipe]
+    options = ["-pl", "service", *recipe_options, active_recipe, "-Drewrite.exclusions=**/Excluded.avsc"]
     subprocess.run(args + options + [PLUGIN + ":dryRunNoFork"], cwd=custom, check=True)
     patch, = custom.rglob("rewrite.patch")
     assert namespace in patch.read_text(), "Missing external namespace in dry run"
@@ -145,6 +151,8 @@ def verify(root, mvn, release):
     test_schema = app / "src/test/avro/Fixture.avsc"
     test_schema.parent.mkdir(parents=True)
     test_schema.write_text('{"type":"record","name":"Fixture","namespace":"example.test.fixture","fields":[]}')
+    second_schema.with_name("Excluded.avsc").write_text(
+        '{"type":"record","name":"Excluded","namespace":"example.excluded","fields":[]}')
     registration = (app / FACTORIES).read_bytes()
 
     config = custom / "selected-package.yml"
@@ -172,10 +180,14 @@ recipeList:
         assert f'TRUSTED_PACKAGE_{index}.equals(packageName)' in initializer
     assert initializer.count("type.getPackageName()") == 1
     assert "example.test.fixture" not in initializer
+    assert "example.excluded" not in initializer
     assert (app / FACTORIES).read_bytes() == registration
     before = snapshot(custom)
     subprocess.run(args + options + [PLUGIN + ":runNoFork"], cwd=custom, check=True)
     assert snapshot(custom) == before, "Repeat run changed a generated initializer"
+    subprocess.run(args + options + ["-Drewrite.additionalPlainTextMasks=**/*.avsc", PLUGIN + ":runNoFork"],
+                   cwd=custom, check=True)
+    assert snapshot(custom) == before, "PlainText parsing produced different trust settings"
     subprocess.run(args + ["-pl", "service", "clean", "verify"], cwd=custom, check=True)
     print("Verified direct discovery, namespace updates, exact package checks, idempotence, and Spring Boot/Avro runtime.")
 

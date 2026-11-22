@@ -1,4 +1,4 @@
-package dev.myraif.rewrite;
+package io.github.arazei.rewrite.recipes;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -18,6 +18,7 @@ import org.openrewrite.maven.tree.MavenResolutionResult;
 import org.openrewrite.maven.tree.Scope;
 import org.openrewrite.maven.tree.Plugin;
 import org.openrewrite.maven.tree.ResolvedPom;
+import org.openrewrite.quark.Quark;
 import org.openrewrite.text.PlainText;
 
 import javax.lang.model.SourceVersion;
@@ -30,6 +31,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -85,7 +87,7 @@ public final class ConfigureAvroTrust extends ScanningRecipe<ConfigureAvroTrust.
                     if (path.getFileName().toString().equals("pom.xml")) {
                         Module module = file.getMarkers().findFirst(MavenResolutionResult.class)
                                 .filter(model -> supported(model, Scope.Compile) && supported(model, Scope.Runtime))
-                                .map(model -> new Module(model.getPom()))
+                                .map(model -> new Module(file, model.getPom()))
                                 .orElse(null);
                         scan.modules.put(path.resolveSibling("").normalize(), module);
                     } else if (path.endsWith(FACTORIES) || path.toString().endsWith(".java") ||
@@ -109,9 +111,12 @@ public final class ConfigureAvroTrust extends ScanningRecipe<ConfigureAvroTrust.
         final Set<String> models = new TreeSet<>();
         final Set<Path> schemaRoots = new HashSet<>(Set.of(SRC));
         final Map<String, Path> classes = new HashMap<>();
+        final SourceFile pomSource;
+        Optional<Path> localDirectory;
         boolean opaqueSchema;
 
-        Module(ResolvedPom pom) {
+        Module(SourceFile pomSource, ResolvedPom pom) {
+            this.pomSource = pomSource;
             for (Plugin plugin : pom.getPlugins()) {
                 if (!"org.apache.avro".equals(plugin.getGroupId()) || !"avro-maven-plugin".equals(plugin.getArtifactId())) {
                     continue;
@@ -148,15 +153,7 @@ public final class ConfigureAvroTrust extends ScanningRecipe<ConfigureAvroTrust.
                 return;
             }
             if (path.toString().endsWith(".avsc") && schemaRoots.stream().anyMatch(path::startsWith)) {
-                if (file instanceof PlainText text) {
-                    try {
-                        models.addAll(AvroSchemaPackages.read(text.getText()));
-                    } catch (IOException malformed) {
-                        opaqueSchema = true;
-                    }
-                } else {
-                    opaqueSchema = true;
-                }
+                inspectSchema(path, file);
             }
             boolean main = path.startsWith(JAVA);
             if (!(file instanceof J.CompilationUnit unit) || !(path.startsWith(SRC) || path.startsWith("target/generated-sources"))) {
@@ -174,6 +171,27 @@ public final class ConfigureAvroTrust extends ScanningRecipe<ConfigureAvroTrust.
                     }
                 }
             }
+        }
+
+        private void inspectSchema(Path path, SourceFile file) {
+            try {
+                if (file instanceof PlainText text) {
+                    models.addAll(AvroSchemaPackages.read(text.getText()));
+                    return;
+                }
+                if (file instanceof Quark schema) {
+                    if (localDirectory == null) {
+                        localDirectory = LocalAvroSchemas.moduleDirectory(pomSource);
+                    }
+                    if (localDirectory.isPresent()) {
+                        models.addAll(LocalAvroSchemas.read(localDirectory.get(), path, schema));
+                        return;
+                    }
+                }
+            } catch (IOException unreadable) {
+                // Keep inspecting other schemas and generated models in this module.
+            }
+            opaqueSchema = true;
         }
     }
 
@@ -213,7 +231,7 @@ public final class ConfigureAvroTrust extends ScanningRecipe<ConfigureAvroTrust.
                 .filter(name -> trustedPackage == null || trustedPackage.equals(name))
                 .toList();
         if (modelPackages.isEmpty()) {
-            String reason = module.opaqueSchema ? "Unreadable schema; check additionalPlainTextMasks" :
+            String reason = module.opaqueSchema ? "Unable to read local Avro schema; check the schema and project paths" :
                     "No matching production Avro model packages; found packages: " + module.models;
             report(ctx, root, reason);
             return;

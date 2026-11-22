@@ -1,4 +1,4 @@
-package dev.myraif.rewrite;
+package io.github.arazei.rewrite.recipes;
 
 import java.io.IOException;
 import java.io.StringReader;

@@ -1,4 +1,4 @@
-package dev.myraif.rewrite;
+package io.github.arazei.rewrite.recipes;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
