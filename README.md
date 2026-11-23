@@ -10,7 +10,7 @@ From the project directory:
 mvn clean install
 ```
 
-A JDK 25 is required to build and run the recipe. The `mvn -version` command shows which JDK Maven uses. `mvn clean install` installs the JAR with coordinates `org.arazei:openrewrite:1.0-SNAPSHOT` and Java 25 bytecode.
+A JDK 25 is required to build and run the recipe. The `mvn -version` command shows which JDK Maven uses. `mvn clean install` installs the JAR with coordinates `io.github.arazei:rewrite-recipes:1.0.0-SNAPSHOT` and Java 25 bytecode.
 
 ## Running in a service
 
@@ -18,7 +18,7 @@ From the root of the target Maven project, activate the Java recipe directly:
 
 ```bash
 mvn org.openrewrite.maven:rewrite-maven-plugin:6.25.0:dryRunNoFork \
-  -Drewrite.recipeArtifactCoordinates=org.arazei:openrewrite:1.0-SNAPSHOT \
+  -Drewrite.recipeArtifactCoordinates=io.github.arazei:rewrite-recipes:1.0.0-SNAPSHOT \
   -Drewrite.activeRecipes=io.github.arazei.rewrite.recipes.ConfigureAvroTrust \
   -Drewrite.exportDatatables=true
 ```
@@ -32,7 +32,7 @@ No additional `.avsc` mask is needed: if the plugin passes only the schema path,
 - Each Maven module is checked independently. The regular JAR `org.apache.avro:avro:1.12.2` must be present on the compile and runtime classpaths. Transitive dependencies and versions from dependency management are supported. Other versions, including 1.11.5 and 1.12.1, are skipped.
 - There must be exactly one top-level class annotated with `@SpringBootApplication` in `src/main/java`. Its name can be arbitrary. The base package is taken from the Java declaration.
 - The recipe searches for record, enum, and fixed definitions in `.avsc` files under `src/` in each module, including `src/avro`, `src/main/avro`, and arbitrary subdirectories. It also supports the production `sourceDirectory` configured in `avro-maven-plugin` and recognizes Java models annotated with `@AvroGenerated`. Trusted packages are derived from confirmed namespaces. The `src/test`, `src/it`, and `src/testFixtures` directories are excluded.
-- The result is `com.example.orders.config.AvroTrustInitializer` and its registration in `src/main/resources/META-INF/spring.factories`. The initializer extends Avro's existing global predicate with exact package-match checks.
+- The result is `com.example.orders.config.AvroTrustInitializer` and its registration in `src/main/resources/META-INF/spring.factories`. By default, the initializer extends Avro's existing global predicate with exact package-match checks.
 - Existing registrations and comments are preserved. For a previously generated class, the recipe updates the package list and restores the registration if needed. A different implementation in the target class, a duplicate initializer key, or an ambiguous application causes the module to be skipped. Comparisons with the expected source account for CRLF/LF differences and surrounding whitespace. Other user modifications are treated as conflicts.
 - Skip reasons are exported to the `ConfigureAvroTrust$Decisions` table in the plugin's report directory when `-Drewrite.exportDatatables=true` is set. The recipe project and target service use separate POM files. The recipe does not change the service's dependencies.
 
@@ -52,3 +52,7 @@ The script creates a separate temporary Maven project and compares the contents 
 ## Explicit package selection
 
 The main command automatically detects all packages. To select one of the detected packages, use the `trustedPackage` option through a declarative recipe, as shown in `examples/myraif-bff-auth.yml`.
+
+To trust whole package hierarchies, copy [the prefix recipe](examples/avro-trust-prefixes.yml) into the target project as `rewrite.yml` and set `rewrite.activeRecipes` to `io.github.arazei.rewrite.recipes.ConfigureAvroTrustByPrefix`. Set `trustedPackagePrefixes` to a non-empty list of Java package names (no wildcards or trailing dots). It cannot be combined with `trustedPackage`.
+
+For example, `ua.raif` matches `ua.raif` and `ua.raif.events.avro`, but not `ua.raifextra` or `ua.raiffeisen`. A module must have at least one discovered production Avro model package under a configured prefix. Once it qualifies, the initializer trusts **all classes** under every configured prefix, including classes from dependencies and classes without `@AvroGenerated`.

@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -49,27 +50,53 @@ public final class ConfigureAvroTrust extends ScanningRecipe<ConfigureAvroTrust.
             example = "com.example.events.avro", required = false)
     private final String trustedPackage;
 
+    @Option(displayName = "Trusted package prefixes",
+            description = "Allow the named Java packages and their subpackages if at least one production Avro model matches. Cannot be combined with trustedPackage.",
+            example = "[ua.raif, ua.raiffeisen]", required = false)
+    private final List<String> trustedPackagePrefixes;
+
     public ConfigureAvroTrust() {
         this(null);
     }
 
+    public ConfigureAvroTrust(String trustedPackage) {
+        this(trustedPackage, null);
+    }
+
     @JsonCreator
-    public ConfigureAvroTrust(@JsonProperty("trustedPackage") String trustedPackage) {
+    public ConfigureAvroTrust(@JsonProperty("trustedPackage") String trustedPackage,
+                              @JsonProperty("trustedPackagePrefixes") List<String> trustedPackagePrefixes) {
         this.trustedPackage = trustedPackage;
+        this.trustedPackagePrefixes = trustedPackagePrefixes == null ? null :
+                Collections.unmodifiableList(new ArrayList<>(trustedPackagePrefixes));
     }
 
     public String getTrustedPackage() {
         return trustedPackage;
     }
 
+    public List<String> getTrustedPackagePrefixes() {
+        return trustedPackagePrefixes;
+    }
+
     @Override public Validated<Object> validate() {
-        return super.validate().and(Validated.test("trustedPackage", "must be one exact Java package name",
-                trustedPackage, value -> value == null || SourceVersion.isName(value)));
+        return super.validate()
+                .and(Validated.test("trustedPackage", "must be one exact Java package name",
+                        trustedPackage, value -> value == null || SourceVersion.isName(value)))
+                .and(Validated.test("trustedPackagePrefixes", "must be a non-empty list of Java package names",
+                        trustedPackagePrefixes, ConfigureAvroTrust::validPrefixes))
+                .and(Validated.test("packageSelection", "trustedPackage and trustedPackagePrefixes are mutually exclusive",
+                        trustedPackagePrefixes, value -> value == null || trustedPackage == null));
+    }
+
+    private static boolean validPrefixes(List<String> prefixes) {
+        return prefixes == null || (!prefixes.isEmpty() &&
+                prefixes.stream().allMatch(name -> name != null && SourceVersion.isName(name)));
     }
 
     @Override public String getDisplayName() { return "Register the application's Avro model packages"; }
     @Override public String getDescription() {
-        return "Register exact Avro model packages for Spring Boot modules using Apache Avro 1.12.2.";
+        return "Register exact Avro model packages or explicitly configured package prefixes for Spring Boot modules using Apache Avro 1.12.2.";
     }
     @Override public Scan getInitialValue(ExecutionContext ctx) { return new Scan(); }
 
@@ -221,6 +248,10 @@ public final class ConfigureAvroTrust extends ScanningRecipe<ConfigureAvroTrust.
     }
 
     private void plan(Path root, Module module, Scan scan, ExecutionContext ctx, List<SourceFile> created) {
+        if (!validPrefixes(trustedPackagePrefixes) || (trustedPackagePrefixes != null && trustedPackage != null)) {
+            report(ctx, root, "Invalid trustedPackagePrefixes configuration");
+            return;
+        }
         if (module.applications.size() != 1 || module.applications.get(0).isEmpty()) {
             report(ctx, root, "Expected one production @SpringBootApplication in a named package");
             return;
@@ -229,6 +260,8 @@ public final class ConfigureAvroTrust extends ScanningRecipe<ConfigureAvroTrust.
         List<String> modelPackages = module.models.stream()
                 .filter(SourceVersion::isName)
                 .filter(name -> trustedPackage == null || trustedPackage.equals(name))
+                .filter(name -> trustedPackagePrefixes == null || trustedPackagePrefixes.stream()
+                        .anyMatch(prefix -> name.equals(prefix) || name.startsWith(prefix + ".")))
                 .toList();
         if (modelPackages.isEmpty()) {
             String reason = module.opaqueSchema ? "Unable to read local Avro schema; check the schema and project paths" :
@@ -239,7 +272,8 @@ public final class ConfigureAvroTrust extends ScanningRecipe<ConfigureAvroTrust.
         String name = base + ".config.AvroTrustInitializer";
         Path javaPath = root.resolve(JAVA).resolve(name.replace('.', '/') + ".java");
         Path factoriesPath = root.resolve(FACTORIES);
-        String source = Initializer.source(base, modelPackages);
+        String source = trustedPackagePrefixes == null ? Initializer.source(base, modelPackages) :
+                Initializer.prefixSource(base, trustedPackagePrefixes.stream().distinct().sorted().toList());
         SourceFile existing = scan.sources.get(javaPath);
         String previous = existing == null ? "" : existing.printAll().replace("\r\n", "\n").strip();
         Path declaration = module.classes.get(name);

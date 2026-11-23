@@ -8,6 +8,8 @@ import java.util.stream.Collectors;
 final class Initializer {
     private static final Pattern PACKAGE_CONSTANT = Pattern.compile(
             "private static final String TRUSTED_PACKAGE_\\d+ = \"([\\p{javaJavaIdentifierPart}.]+)\";");
+    private static final Pattern PREFIX_CONSTANT = Pattern.compile(
+            "private static final String TRUSTED_PACKAGE_PREFIX_\\d+ = \"([\\p{javaJavaIdentifierPart}.]+)\";");
     private static final Pattern LEGACY_PACKAGE_CHECK = Pattern.compile(
             "\"([\\p{javaJavaIdentifierPart}.]+)\"\\.equals\\(type\\.getPackageName\\(\\)\\)");
     private static final String OR = "\n                    || ";
@@ -15,28 +17,45 @@ final class Initializer {
     private Initializer() {}
 
     static String source(String base, List<String> modelPackages) {
+        return source(base, modelPackages, false);
+    }
+
+    static String prefixSource(String base, List<String> prefixes) {
+        return source(base, prefixes, true);
+    }
+
+    private static String source(String base, List<String> packages, boolean prefixes) {
         StringBuilder constants = new StringBuilder();
         StringJoiner checks = new StringJoiner(OR);
         int index = 1;
-        for (String modelPackage : modelPackages) {
-            String constant = "TRUSTED_PACKAGE_" + index++;
+        for (String name : packages) {
+            String constant = (prefixes ? "TRUSTED_PACKAGE_PREFIX_" : "TRUSTED_PACKAGE_") + index++;
             constants.append("    private static final String ").append(constant)
-                    .append(" = \"").append(modelPackage).append("\";\n");
-            checks.add(constant + ".equals(packageName)");
+                    .append(" = \"").append(name).append("\";\n");
+            checks.add(prefixes ? "matchesPackage(packageName, " + constant + ")" : constant + ".equals(packageName)");
         }
         checks.add("previous.isTrusted(type)");
+        String prefixMatcher = prefixes ? """
+
+                        private static boolean matchesPackage(String packageName, String prefix) {
+                            int length = prefix.length();
+                            return packageName.startsWith(prefix)
+                                    && (packageName.length() == length || packageName.charAt(length) == '.');
+                        }
+                """ : "";
         return render(base, constants.append('\n').toString(),
-                "            String packageName = type.getPackageName();\n", checks.toString());
+                "            String packageName = type.getPackageName();\n", checks.toString(), prefixMatcher);
     }
 
     private static String legacySource(String base, List<String> modelPackages) {
         String packageChecks = modelPackages.stream()
                 .map(name -> "\"" + name + "\".equals(type.getPackageName())")
                 .collect(Collectors.joining(OR));
-        return render(base, "", "", packageChecks + " || previous.isTrusted(type)");
+        return render(base, "", "", packageChecks + " || previous.isTrusted(type)", "");
     }
 
-    private static String render(String base, String constants, String packageNameDeclaration, String checks) {
+    private static String render(String base, String constants, String packageNameDeclaration, String checks,
+                                 String prefixMatcher) {
         return """
                 package %s.config;
 
@@ -61,12 +80,16 @@ final class Initializer {
                         public boolean isTrusted(Class<?> type) {
                 %s            return %s;
                         }
-                    }
+                %s    }
                 }
-                """.formatted(base, constants, packageNameDeclaration, checks);
+                """.formatted(base, constants, packageNameDeclaration, checks, prefixMatcher);
     }
 
     static boolean isGeneratedSource(String base, String candidate) {
+        List<String> prefixes = packagesIn(candidate, PREFIX_CONSTANT);
+        if (!prefixes.isEmpty()) {
+            return candidate.equals(prefixSource(base, prefixes).strip());
+        }
         List<String> packages = packagesIn(candidate, PACKAGE_CONSTANT);
         if (!packages.isEmpty()) {
             return candidate.equals(source(base, packages).strip());

@@ -8,7 +8,7 @@ import tempfile
 
 PLUGIN = "org.openrewrite.maven:rewrite-maven-plugin:6.25.0"
 RECIPE = "io.github.arazei.rewrite.recipes.ConfigureAvroTrust"
-COORDINATES = "org.arazei:openrewrite:1.0-SNAPSHOT"
+COORDINATES = "io.github.arazei:rewrite-recipes:1.0.0-SNAPSHOT"
 HERE = Path(__file__).resolve().parent
 APP = Path("src/main/java/example/orders")
 FACTORIES = Path("src/main/resources/META-INF/spring.factories")
@@ -130,7 +130,7 @@ def verify(root, mvn, release):
     custom.mkdir()
     fixture(custom)
     app = custom / "service"
-    namespace = "ua.aval.clients.diiagateway.myraifbffauth.avro"
+    namespace = "ua.raif.events.avro"
     (app / "src/avro").rename(app / "schemas")
     pom = app / "pom.xml"
     pom.write_text(pom.read_text().replace("<sourceDirectory>src/avro</sourceDirectory>",
@@ -189,7 +189,34 @@ recipeList:
                    cwd=custom, check=True)
     assert snapshot(custom) == before, "PlainText parsing produced different trust settings"
     subprocess.run(args + ["-pl", "service", "clean", "verify"], cwd=custom, check=True)
-    print("Verified direct discovery, namespace updates, exact package checks, idempotence, and Spring Boot/Avro runtime.")
+
+    # Switch the generated exact initializer to explicit prefixes and verify the runtime package boundaries.
+    prefix_config = HERE.parents[1] / "examples/avro-trust-prefixes.yml"
+    prefix_run = ["-pl", "service,model-only", *recipe_options, PLUGIN + ":runNoFork",
+                  f"-Drewrite.activeRecipes={RECIPE}ByPrefix", f"-Drewrite.configLocation={prefix_config}"]
+    subprocess.run(args + prefix_run, cwd=custom, check=True)
+    assert not (custom / "model-only" / FACTORIES).exists(), "Prefix recipe applied without a matching production model"
+    initializer = (app / INITIALIZER).read_text()
+    assert 'TRUSTED_PACKAGE_PREFIX_1 = "ua.raif";' in initializer
+    assert 'TRUSTED_PACKAGE_PREFIX_2 = "ua.raiffeisen";' in initializer
+    assert second_namespace not in initializer
+    assert (app / FACTORIES).read_bytes() == registration
+    prefixed = snapshot(custom)
+    subprocess.run(args + prefix_run, cwd=custom, check=True)
+    assert snapshot(custom) == prefixed, "Repeat run changed the prefix initializer"
+
+    test_java = app / "src/test/java"
+    for package, name in (("ua.raif", "RootPackage"), ("ua.raiffeisen.events", "OtherPrefix"),
+                          ("ua.raifextra.events", "SimilarPackage")):
+        directory = test_java.joinpath(*package.split("."))
+        directory.mkdir(parents=True)
+        (directory / f"{name}.java").write_text(f"package {package}; public final class {name} {{}}\n")
+    shutil.copyfile(HERE / "prefix/PrefixTrustTest.java", test_java / "example/orders/PrefixTrustTest.java")
+    subprocess.run(args + ["-pl", "service", "clean", "verify"], cwd=custom, check=True)
+    subprocess.run(args + options + [PLUGIN + ":runNoFork"], cwd=custom, check=True)
+    assert hashlib.sha256((app / INITIALIZER).read_bytes()).digest() == before[Path("service") / INITIALIZER], \
+        "Exact recipe could not replace the prefix initializer"
+    print("Verified direct discovery, exact and prefix package checks, idempotence, and Spring Boot/Avro runtime.")
 
 
 if __name__ == "__main__":
