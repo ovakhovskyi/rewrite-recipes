@@ -53,6 +53,15 @@ The script creates a separate temporary Maven project and compares the contents 
 
 The main command automatically detects all packages. To select one of the detected packages, use the `trustedPackage` option through a declarative recipe, as shown in `examples/myraif-bff-auth.yml`.
 
-To trust whole package hierarchies, copy [the prefix recipe](examples/avro-trust-prefixes.yml) into the target project as `rewrite.yml` and set `rewrite.activeRecipes` to `io.github.arazei.rewrite.recipes.ConfigureAvroTrustByPrefix`. Set `trustedPackagePrefixes` to a non-empty list of Java package names (no wildcards or trailing dots). It cannot be combined with `trustedPackage`.
+To trust whole package hierarchies, run this from the root of the target project. Replace `/path/to/openrewrite` with the path to this repository:
 
-For example, `ua.raif` matches `ua.raif` and `ua.raif.events.avro`, but not `ua.raifextra` or `ua.raiffeisen`. A module must have at least one discovered production Avro model package under a configured prefix. Once it qualifies, the initializer trusts **all classes** under every configured prefix, including classes from dependencies and classes without `@AvroGenerated`.
+```bash
+mvn org.openrewrite.maven:rewrite-maven-plugin:6.25.0:dryRunNoFork \
+  -Drewrite.recipeArtifactCoordinates=io.github.arazei:rewrite-recipes:1.0.0-SNAPSHOT \
+  -Drewrite.activeRecipes=io.github.arazei.rewrite.recipes.AvroTrust \
+  '-Drewrite.configLocation=/path/to/openrewrite/examples/avro-trust-prefixes.yml'
+```
+
+The active recipe is the `name:` in [the YAML file](examples/avro-trust-prefixes.yml). That recipe calls the Java recipe with `trustedPackagePrefixes`. Set it to a non-empty list of Java package names (no wildcards or trailing dots). It cannot be combined with `trustedPackage`. To apply the changes, use `runNoFork` instead of `dryRunNoFork`.
+
+A module must have at least one discovered production Avro model package under a configured prefix. Once it qualifies, the initializer trusts **all classes** under every configured prefix, including classes from dependencies and classes without `@AvroGenerated`.
