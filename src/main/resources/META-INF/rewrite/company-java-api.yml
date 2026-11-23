@@ -1,0 +1,25 @@
+type: specs.openrewrite.org/v1beta/recipe
+name: io.github.arazei.rewrite.recipes.migration.boot4.MigrateCompanyJavaApi
+displayName: Migrate MyRaif Java API types
+description: Update Java references to MyRaif error and security types moved to the common API for Spring Boot 4.
+recipeList:
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: ua.aval.myraif.error.code.ErrorCode
+      newFullyQualifiedTypeName: ua.raiffeisen.myraif.common.api.error.ErrorCode
+      ignoreDefinition: true
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: ua.aval.myraif.error.exception.MyRaifException
+      newFullyQualifiedTypeName: ua.raiffeisen.myraif.common.api.exception.MyRaifException
+      ignoreDefinition: true
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: ua.aval.myraif.error.exception.RaiffeisenFeignException
+      newFullyQualifiedTypeName: ua.raiffeisen.myraif.common.api.exception.WrapperFeignException
+      ignoreDefinition: true
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: ua.aval.myraiff.security.context.CurrentUserContext
+      newFullyQualifiedTypeName: ua.raiffeisen.myraif.common.api.security.context.CurrentUserContext
+      ignoreDefinition: true
+  - org.openrewrite.java.ChangeType:
+      oldFullyQualifiedTypeName: ua.aval.myraiff.security.context.DeviceFingerprint
+      newFullyQualifiedTypeName: ua.raiffeisen.myraif.common.api.security.context.DeviceFingerprint
+      ignoreDefinition: true

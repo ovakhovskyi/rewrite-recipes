@@ -27,6 +27,48 @@ Review `target/rewrite/rewrite.patch`. To apply the changes, replace `:dryRunNoF
 
 No additional `.avsc` mask is needed: if the plugin passes only the schema path, the recipe reads it from disk. Only files included in the plugin's source set are considered. If `plainTextMasks` is overridden in the plugin configuration, ensure the list includes `**/META-INF/spring.factories`. Run the recipe against the complete main source and resource set, including any existing initializer and `spring.factories`. If the recipe is part of a migration that updates the BOM, run it **after** the update, when Avro 1.12.2 is resolved on the classpath.
 
+### Migrate to Java 25 and Spring Boot 4
+
+The [composite recipe](examples/migration-boot4.yml) upgrades to Java 25 and the latest Spring Boot `4.1.x` release. Arconia's Spring Boot migration includes the Jackson 2 → 3 recipe. The composite also updates OpenAPI Generator's `spring` configuration for Boot 4 and Jackson 3, runs OpenRewrite's Testcontainers 2 migration, and configures Avro trust for the package prefixes listed in the YAML. Install the recipe JAR as described above, then run this from the root of the target service on JDK 25:
+
+```bash
+mvn -s settings.xml -U \
+  org.openrewrite.maven:rewrite-maven-plugin:6.46.1:dryRun \
+  -Drewrite.recipeArtifactCoordinates="org.openrewrite.recipe:rewrite-migrate-java:RELEASE,io.arconia.migrations:rewrite-spring:RELEASE,org.openrewrite.recipe:rewrite-spring:RELEASE,org.openrewrite.recipe:rewrite-testing-frameworks:RELEASE,io.github.arazei:rewrite-recipes:1.0.0-SNAPSHOT" \
+  -Drewrite.activeRecipes=io.github.arazei.rewrite.recipes.UpgradeToJava25AndSpringBoot4 \
+  '-Drewrite.configLocation=/path/to/openrewrite/examples/migration-boot4.yml' \
+  '-Drewrite.additionalPlainTextMasks=**/Dockerfile' \
+  -Drewrite.failOnInvalidActiveRecipes=true \
+  -Drewrite.exportDatatables=true
+```
+
+Review `target/rewrite/rewrite.patch`, replace `:dryRun` with `:run`, then verify with `mvn -s settings.xml verify`. The composite does not upgrade Avro itself. If the trust changes are missing because the module did not yet resolve Avro 1.12.2, rerun after the module resolves that version on both production classpaths.
+
+For Testcontainers, check any `DockerComposeContainer` replacements: the recipe can leave `<?>` or constructor `<>` on `ComposeContainer`, which is not generic. Remove those type arguments if present.
+
+`io.github.arazei.rewrite.recipes.migration.boot4.MigrateCompanyDependencies` sets `myraif.platform.dependencies.version` to `4.1.3-v.1` and imports `ua.raiffeisen.myraif:myraif-platform-dependencies` using that property. It moves `myraif-bff-error-handling-lib` from `ua.aval.myraif` to `ua.raiffeisen.myraif` and removes explicit versions from direct dependencies whose group IDs start with `ua.aval.myraif` or `ua.raiffeisen.myraif` (no dot is required after the prefix). To run just this step, use its recipe name and `io.github.arazei:rewrite-recipes:1.0.0-SNAPSHOT` as the only recipe artifact and omit `rewrite.configLocation` and the Dockerfile mask. After applying the patch, verify that the BOM manages the affected dependencies with `mvn -s settings.xml verify`.
+
+`io.github.arazei.rewrite.recipes.migration.boot4.MigrateCompanyJavaApi` updates imports and references to `ErrorCode`, `MyRaifException`, `CurrentUserContext`, and `DeviceFingerprint` to their new MyRaif Common API packages. It also replaces `RaiffeisenFeignException` with `WrapperFeignException` in both the import and Java type usages, without adapting constructor or method arguments. To preview just this step, run:
+
+```bash
+mvn -s settings.xml org.openrewrite.maven:rewrite-maven-plugin:6.46.1:dryRun \
+  -Drewrite.recipeArtifactCoordinates=io.github.arazei:rewrite-recipes:1.0.0-SNAPSHOT \
+  -Drewrite.activeRecipes=io.github.arazei.rewrite.recipes.migration.boot4.MigrateCompanyJavaApi \
+  -Drewrite.failOnInvalidActiveRecipes=true
+```
+
+Run the Java API migration on the original service while Maven can still resolve the old types. The composite updates the POM and Java sources in the same patch, but Java is parsed against the original classpath. After applying the composite patch, run `mvn -s settings.xml verify` to check that the new libraries resolve and the existing calls compile against the replacement API.
+
+`io.github.arazei.rewrite.recipes.migration.boot4.MigrateSpringBootDockerfile` replaces the image in every `FROM` in files named `Dockerfile` with `harbor.shared.avalaunch.rbua/infra-resources/eclipse-temurin-base-image:21-jre-ubi10-minimal`, including `FROM` references to earlier stages. It preserves `--platform` and `AS` aliases and adds `WORKDIR /app` immediately after `FROM` only when that stage has no `WORKDIR`. To run just this step, use its recipe name and `io.github.arazei:rewrite-recipes:1.0.0-SNAPSHOT` as the only recipe artifact, omit `rewrite.configLocation`, and keep the Dockerfile mask. Reinstall the recipe JAR to pick up changes to this step.
+
+`io.github.arazei.rewrite.recipes.migration.boot4.MigrateSpringBootLayeredDockerfile` migrates the legacy layered layout as a unit: it renames the builder JAR to `application.jar`, uses `jarmode=tools` to extract into `extracted`, updates all four layer copies, and changes the exec-form `ENTRYPOINT` from `JarLauncher` to `-jar application.jar` while retaining JVM options. It matches the relevant instructions across stages, leaving incomplete layouts for manual review. The layout assumes `/app` on both stages, which the preceding recipe sets if absent. A service compiled for Java 25 requires a Java 25 runtime; the corporate Java 21 tag set by the preceding recipe does not meet that requirement.
+
+`io.github.arazei.rewrite.recipes.migration.boot4.MigrateGitHubWorkflows` updates `.github/workflows/*.yml` and `.github/workflows/*.yaml`. It replaces `image` values starting with `harbor.shared.avalaunch.rbua/infra-resources/maven-` with `harbor.shared.avalaunch.rbua/infra-resources/maven-3.10:25`. When a mapping contains both a `tool` starting with `maven-` and a scalar `version`, it sets them to `maven-3.10` and `25`. For a standalone preview, use this recipe name in the Java API preview command above.
+
+`io.github.arazei.rewrite.recipes.migration.boot4.RemoveLegacyClasses` removes direct and indirect subclasses of `ua.aval.myraif.error.advice.GeneralAdvice` and `ua.aval.myraif.error.advice.WebExceptionHandler`. It keeps subclasses referenced by surviving Java code, including tests, and explains why in the `RemoveLegacyClasses$RetainedClasses` data table (`-Drewrite.exportDatatables=true`). Review the patch while the old types are still available on the classpath: the recipe relies on Java type attribution and does not inspect configuration or reflective string references.
+
+`io.github.arazei.rewrite.recipes.migration.boot4.ConfigureApplicationProperties` sets `management.opentelemetry.tracing.export.otlp.transport` to `GRPC` and `management.otlp.metrics.export.enabled` to the YAML boolean `false` in the base document of existing `src/main/resources/application.yml` files. It adds missing keys and updates existing nested or dotted keys in place; profile documents and separate profile files are left untouched.
+
 ## Applicability conditions
 
 - Each Maven module is checked independently. The regular JAR `org.apache.avro:avro:1.12.2` must be present on the compile and runtime classpaths. Transitive dependencies and versions from dependency management are supported. Other versions, including 1.11.5 and 1.12.1, are skipped.
