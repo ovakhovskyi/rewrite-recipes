@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 
 class MigrateCompanyDependenciesTest {
     private static final String PROPERTY = "myraif.platform.dependencies.version";
+    private static final String ALTERNATE_PROPERTY = "myraif-platform-dependencies.version";
 
     @Test
     void createsMissingSectionsAndIsIdempotent() {
@@ -72,22 +73,61 @@ class MigrateCompanyDependenciesTest {
     }
 
     @Test
+    void usesDeclaredHyphenatedPropertyForNewOrLiteralBomImports() {
+        for (String management : new String[]{"", management("4.1.2-v.1")}) {
+            var migrated = migrate(pom("<properties>" + property(ALTERNATE_PROPERTY, "4.1.2-v.1") +
+                    "</properties>" + management));
+            assertBom(migrated, ALTERNATE_PROPERTY);
+            assertEquals(1, child(migrated.getRoot(), "properties").getChildren().size());
+            var reparsed = parse(migrated.printAll());
+            assertSame(reparsed, migrate(reparsed));
+        }
+    }
+
+    @Test
+    void prefersReferencedPropertyOverOtherDeclaredProperty() {
+        String properties = "<properties>" + property(PROPERTY, "3.5.16-v.4") +
+                property(ALTERNATE_PROPERTY, "4.1.2-v.1") + "</properties>";
+        var migrated = migrate(pom(management("${" + ALTERNATE_PROPERTY + "}") + properties));
+        assertBom(migrated, ALTERNATE_PROPERTY);
+        assertEquals("3.5.16-v.4", child(migrated.getRoot(), "properties").getChildValue(PROPERTY).orElseThrow());
+
+        var literal = migrate(pom(properties + management("4.1.2-v.1")));
+        assertBom(literal);
+        assertEquals("4.1.2-v.1", child(literal.getRoot(), "properties").getChildValue(ALTERNATE_PROPERTY).orElseThrow());
+    }
+
+    @Test
     void ignoresOtherXmlDocuments() {
         Xml.Document document = pom("").withSourcePath(Path.of("config.xml"));
         assertSame(document, migrate(document));
     }
 
     private static void assertBom(Xml.Document migrated) {
+        assertBom(migrated, PROPERTY);
+    }
+
+    private static void assertBom(Xml.Document migrated, String property) {
         Xml.Tag root = migrated.getRoot();
-        assertEquals("4.1.3-v.1", child(root, "properties").getChildValue(PROPERTY).orElseThrow());
+        assertEquals("4.1.3-v.1", child(root, "properties").getChildValue(property).orElseThrow());
         var imports = child(child(root, "dependencyManagement"), "dependencies").getChildren("dependency").stream()
                 .filter(tag -> tag.getChildValue("artifactId").orElse("").equals("myraif-platform-dependencies")).toList();
         assertEquals(1, imports.size());
         Xml.Tag bom = imports.getFirst();
         assertEquals("ua.raiffeisen.myraif", bom.getChildValue("groupId").orElseThrow());
-        assertEquals("${" + PROPERTY + "}", bom.getChildValue("version").orElseThrow());
+        assertEquals("${" + property + "}", bom.getChildValue("version").orElseThrow());
         assertEquals("pom", bom.getChildValue("type").orElseThrow());
         assertEquals("import", bom.getChildValue("scope").orElseThrow());
+    }
+
+    private static String management(String version) {
+        return "<dependencyManagement><dependencies>" +
+                dependency("ua.raiffeisen.myraif", "myraif-platform-dependencies", version) +
+                "</dependencies></dependencyManagement>";
+    }
+
+    private static String property(String name, String value) {
+        return "<" + name + ">" + value + "</" + name + ">";
     }
 
     private static Xml.Tag child(Xml.Tag tag, String name) {

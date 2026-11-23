@@ -15,7 +15,8 @@ public final class MigrateCompanyDependencies extends Recipe {
     private static final String COMPANY_GROUP = "ua.raiffeisen.myraif";
     private static final String BOM_ARTIFACT = "myraif-platform-dependencies";
     private static final String BOM_PROPERTY = "myraif.platform.dependencies.version";
-    private static final String BOM_REFERENCE = "${" + BOM_PROPERTY + "}";
+    private static final String ALTERNATE_BOM_PROPERTY = "myraif-platform-dependencies.version";
+    private static final String SELECTED_PROPERTY = "myraif.bom.selectedProperty";
     private static final String BOM_VERSION = "4.1.3-v.1";
     private static final String BOM = """
             <dependency>
@@ -24,7 +25,7 @@ public final class MigrateCompanyDependencies extends Recipe {
                 <version>%s</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency>""".formatted(COMPANY_GROUP, BOM_ARTIFACT, BOM_REFERENCE);
+            </dependency>""";
 
     private static final XPathMatcher PROJECT = new XPathMatcher("/project");
     private static final XPathMatcher PROPERTIES = new XPathMatcher("/project/properties");
@@ -49,28 +50,33 @@ public final class MigrateCompanyDependencies extends Recipe {
         return new XmlIsoVisitor<ExecutionContext>() {
             @Override
             public Xml.Document visitDocument(Xml.Document document, ExecutionContext ctx) {
-                return document.getSourcePath().endsWith("pom.xml") ? super.visitDocument(document, ctx) : document;
+                if (!document.getSourcePath().endsWith("pom.xml")) {
+                    return document;
+                }
+                getCursor().putMessage(SELECTED_PROPERTY, selectBomProperty(document.getRoot()));
+                return super.visitDocument(document, ctx);
             }
 
             @Override
             public Xml.Tag visitTag(Xml.Tag tag, ExecutionContext ctx) {
                 Xml.Tag t = super.visitTag(tag, ctx);
+                String property = getCursor().getNearestMessage(SELECTED_PROPERTY);
                 if (PROJECT.matches(getCursor())) {
                     if (t.getChild("properties").isEmpty()) {
-                        t = add(t, wrap("properties", wrap(BOM_PROPERTY, BOM_VERSION)), ctx);
+                        t = add(t, wrap("properties", wrap(property, BOM_VERSION)), ctx);
                     }
                     if (t.getChild("dependencyManagement").isEmpty()) {
-                        t = add(t, wrap("dependencyManagement", wrap("dependencies", BOM)), ctx);
+                        t = add(t, wrap("dependencyManagement", wrap("dependencies", bom(property))), ctx);
                     }
                 } else if (PROPERTIES.matches(getCursor())) {
-                    t = setValue(t, BOM_PROPERTY, BOM_VERSION, ctx);
+                    t = setValue(t, property, BOM_VERSION, ctx);
                 } else if (MANAGEMENT.matches(getCursor()) && t.getChild("dependencies").isEmpty()) {
-                    t = add(t, wrap("dependencies", BOM), ctx);
+                    t = add(t, wrap("dependencies", bom(property)), ctx);
                 } else if (MANAGED_DEPENDENCIES.matches(getCursor()) &&
                         t.getChildren("dependency").stream().noneMatch(MigrateCompanyDependencies::isCompanyBom)) {
-                    t = add(t, BOM, ctx);
+                    t = add(t, bom(property), ctx);
                 } else if (MANAGED_DEPENDENCY.matches(getCursor()) && isCompanyBom(t)) {
-                    t = setValue(t, "version", BOM_REFERENCE, ctx);
+                    t = setValue(t, "version", reference(property), ctx);
                     t = setValue(t, "type", "pom", ctx);
                     t = setValue(t, "scope", "import", ctx);
                 } else if (DIRECT_DEPENDENCY.matches(getCursor())) {
@@ -105,6 +111,35 @@ public final class MigrateCompanyDependencies extends Recipe {
                 return updated;
             }
         };
+    }
+
+    private static String selectBomProperty(Xml.Tag project) {
+        String version = project.getChild("dependencyManagement")
+                .flatMap(management -> management.getChild("dependencies"))
+                .flatMap(dependencies -> dependencies.getChildren("dependency").stream()
+                        .filter(MigrateCompanyDependencies::isCompanyBom).findFirst())
+                .flatMap(bom -> bom.getChildValue("version"))
+                .map(String::strip)
+                .orElse("");
+        if (reference(ALTERNATE_BOM_PROPERTY).equals(version)) {
+            return ALTERNATE_BOM_PROPERTY;
+        }
+        if (reference(BOM_PROPERTY).equals(version)) {
+            return BOM_PROPERTY;
+        }
+        return project.getChild("properties")
+                .filter(properties -> properties.getChild(BOM_PROPERTY).isEmpty())
+                .filter(properties -> properties.getChild(ALTERNATE_BOM_PROPERTY).isPresent())
+                .map(properties -> ALTERNATE_BOM_PROPERTY)
+                .orElse(BOM_PROPERTY);
+    }
+
+    private static String reference(String property) {
+        return "${" + property + "}";
+    }
+
+    private static String bom(String property) {
+        return BOM.formatted(COMPANY_GROUP, BOM_ARTIFACT, reference(property));
     }
 
     private static boolean isCompanyBom(Xml.Tag tag) {
