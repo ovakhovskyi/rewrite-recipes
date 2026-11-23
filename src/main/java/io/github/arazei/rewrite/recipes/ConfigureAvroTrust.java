@@ -52,7 +52,7 @@ public final class ConfigureAvroTrust extends ScanningRecipe<ConfigureAvroTrust.
 
     @Option(displayName = "Trusted package prefixes",
             description = "Allow the named Java packages and their subpackages if at least one production Avro model matches. Cannot be combined with trustedPackage.",
-            example = "[ua.raif, ua.raiffeisen]", required = false)
+            example = "[com.example.orders, com.example.payments]", required = false)
     private final List<String> trustedPackagePrefixes;
 
     public ConfigureAvroTrust() {

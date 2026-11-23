@@ -5,5 +5,5 @@ description: Trust the configured Java packages and their subpackages in modules
 recipeList:
   - io.github.arazei.rewrite.recipes.ConfigureAvroTrust:
       trustedPackagePrefixes:
-        - ua.raif
-        - ua.raiffeisen
+        - com.example.orders
+        - com.example.payments

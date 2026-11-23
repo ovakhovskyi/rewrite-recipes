@@ -1,12 +1,12 @@
 package example.orders;
 
+import com.example.orders.RootPackage;
+import com.example.orders.events.avro.OrderEvent;
+import com.example.ordersarchive.events.SimilarPackage;
+import com.example.payments.events.OtherPrefix;
 import example.orders.config.AvroTrustInitializer;
 import org.apache.avro.util.ClassSecurityValidator;
 import org.junit.jupiter.api.Test;
-import ua.raif.RootPackage;
-import ua.raif.events.avro.OrderEvent;
-import ua.raiffeisen.events.OtherPrefix;
-import ua.raifextra.events.SimilarPackage;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;

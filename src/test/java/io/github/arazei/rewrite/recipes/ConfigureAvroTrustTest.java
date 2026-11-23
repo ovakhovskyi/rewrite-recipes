@@ -12,15 +12,15 @@ class ConfigureAvroTrustTest {
     @Test
     void validatesExplicitPrefixSelection() {
         assertTrue(new ConfigureAvroTrust().validate().isValid());
-        assertTrue(new ConfigureAvroTrust(null, List.of("ua.raif", "ua.raiffeisen")).validate().isValid());
-        assertFalse(new ConfigureAvroTrust("ua.raif.events", List.of("ua.raif")).validate().isValid());
+        assertTrue(new ConfigureAvroTrust(null, List.of("com.example.orders", "com.example.payments")).validate().isValid());
+        assertFalse(new ConfigureAvroTrust("com.example.orders.events", List.of("com.example.orders")).validate().isValid());
     }
 
     @Test
     void rejectsEmptyOrMalformedPrefixes() {
         assertFalse(new ConfigureAvroTrust(null, List.of()).validate().isValid());
         assertFalse(new ConfigureAvroTrust(null, Collections.singletonList(null)).validate().isValid());
-        assertFalse(new ConfigureAvroTrust(null, List.of("ua.raif.")).validate().isValid());
-        assertFalse(new ConfigureAvroTrust(null, List.of("ua.raif.*")).validate().isValid());
+        assertFalse(new ConfigureAvroTrust(null, List.of("com.example.orders.")).validate().isValid());
+        assertFalse(new ConfigureAvroTrust(null, List.of("com.example.orders.*")).validate().isValid());
     }
 }

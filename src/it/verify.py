@@ -130,7 +130,7 @@ def verify(root, mvn, release):
     custom.mkdir()
     fixture(custom)
     app = custom / "service"
-    namespace = "ua.raif.events.avro"
+    namespace = "com.example.orders.events.avro"
     (app / "src/avro").rename(app / "schemas")
     pom = app / "pom.xml"
     pom.write_text(pom.read_text().replace("<sourceDirectory>src/avro</sourceDirectory>",
@@ -197,8 +197,8 @@ recipeList:
     subprocess.run(args + prefix_run, cwd=custom, check=True)
     assert not (custom / "model-only" / FACTORIES).exists(), "Prefix recipe applied without a matching production model"
     initializer = (app / INITIALIZER).read_text()
-    assert 'TRUSTED_PACKAGE_PREFIX_1 = "ua.raif";' in initializer
-    assert 'TRUSTED_PACKAGE_PREFIX_2 = "ua.raiffeisen";' in initializer
+    assert 'TRUSTED_PACKAGE_PREFIX_1 = "com.example.orders";' in initializer
+    assert 'TRUSTED_PACKAGE_PREFIX_2 = "com.example.payments";' in initializer
     assert second_namespace not in initializer
     assert (app / FACTORIES).read_bytes() == registration
     prefixed = snapshot(custom)
@@ -206,8 +206,8 @@ recipeList:
     assert snapshot(custom) == prefixed, "Repeat run changed the prefix initializer"
 
     test_java = app / "src/test/java"
-    for package, name in (("ua.raif", "RootPackage"), ("ua.raiffeisen.events", "OtherPrefix"),
-                          ("ua.raifextra.events", "SimilarPackage")):
+    for package, name in (("com.example.orders", "RootPackage"), ("com.example.payments.events", "OtherPrefix"),
+                          ("com.example.ordersarchive.events", "SimilarPackage")):
         directory = test_java.joinpath(*package.split("."))
         directory.mkdir(parents=True)
         (directory / f"{name}.java").write_text(f"package {package}; public final class {name} {{}}\n")

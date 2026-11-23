@@ -51,14 +51,14 @@ The script creates a separate temporary Maven project and compares the contents 
 
 ## Explicit package selection
 
-The main command automatically detects all packages. To select one of the detected packages, use the `trustedPackage` option through a declarative recipe, as shown in `examples/myraif-bff-auth.yml`.
+The main command automatically detects all packages. To select one of the detected packages, use the `trustedPackage` option through a declarative recipe, as shown in [the exact-package example](examples/avro-trust-exact-package.yml).
 
 To trust whole package hierarchies, run this from the root of the target project. Replace `/path/to/openrewrite` with the path to this repository:
 
 ```bash
 mvn org.openrewrite.maven:rewrite-maven-plugin:6.25.0:dryRunNoFork \
   -Drewrite.recipeArtifactCoordinates=io.github.arazei:rewrite-recipes:1.0.0-SNAPSHOT \
-  -Drewrite.activeRecipes=io.github.arazei.rewrite.recipes.AvroTrust \
+  -Drewrite.activeRecipes=io.github.arazei.rewrite.recipes.ConfigureAvroTrustByPrefix \
   '-Drewrite.configLocation=/path/to/openrewrite/examples/avro-trust-prefixes.yml'
 ```
 
