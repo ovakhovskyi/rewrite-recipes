@@ -1,7 +1,7 @@
 type: specs.openrewrite.org/v1beta/recipe
 name: io.github.arazei.rewrite.recipes.AvroTrust
-displayName: Configure Avro trust for one package
-description: Register the package used by the order event schemas.
+displayName: Add an explicit trusted package for Avro
+description: Trust the order event package alongside discovered Avro model packages.
 recipeList:
   - io.github.arazei.rewrite.recipes.ConfigureAvroTrust:
       trustedPackage: example.orders.avro

@@ -155,21 +155,6 @@ def verify(root, mvn, release):
         '{"type":"record","name":"Excluded","namespace":"example.excluded","fields":[]}')
     registration = (app / FACTORIES).read_bytes()
 
-    config = custom / "selected-package.yml"
-    config.write_text(f"""type: specs.openrewrite.org/v1beta/recipe
-name: test.fixture.SelectAvroPackage
-displayName: Select an Avro package
-description: Configure trust for a single production package.
-recipeList:
-  - {RECIPE}:
-      trustedPackage: {namespace}
-""")
-    before = snapshot(custom)
-    subprocess.run(args + ["-pl", "service", *recipe_options, PLUGIN + ":runNoFork",
-                           "-Drewrite.activeRecipes=test.fixture.SelectAvroPackage",
-                           f"-Drewrite.configLocation={config}"], cwd=custom, check=True)
-    assert snapshot(custom) == before, "Explicit package selection changed the configured trust"
-
     # Migrate the old inline checks while adding the detected package to the same registration.
     legacy = (HERE / "legacy/AvroTrustInitializer.java").read_text()
     (app / INITIALIZER).write_text(legacy.replace("example.orders.avro", namespace))
@@ -190,24 +175,36 @@ recipeList:
     assert snapshot(custom) == before, "PlainText parsing produced different trust settings"
     subprocess.run(args + ["-pl", "service", "clean", "verify"], cwd=custom, check=True)
 
-    # Switch the generated exact initializer to explicit prefixes and verify the runtime package boundaries.
-    prefix_config = HERE.parents[1] / "examples/avro-trust-prefixes.yml"
-    prefix_run = ["-pl", "service,model-only", *recipe_options, PLUGIN + ":runNoFork",
-                  f"-Drewrite.activeRecipes={RECIPE}ByPrefix", f"-Drewrite.configLocation={prefix_config}"]
-    subprocess.run(args + prefix_run, cwd=custom, check=True)
-    assert not (custom / "model-only" / FACTORIES).exists(), "Prefix recipe applied without a matching production model"
+    # Add both explicit options, even in a module with no production models.
+    explicit_package = "com.example.external.events"
+    prefix_example = HERE.parents[1] / "examples/avro-trust-prefixes.yml"
+    combined_config = custom / "combined-trust.yml"
+    combined_config.write_text(prefix_example.read_text().replace(
+        "      trustedPackagePrefixes:",
+        f"      trustedPackage: {explicit_package}\n      trustedPackagePrefixes:"))
+    combined_run = ["-pl", "service,schema-free", *recipe_options, PLUGIN + ":runNoFork",
+                    "-Drewrite.exclusions=**/Excluded.avsc",
+                    f"-Drewrite.activeRecipes={RECIPE}ByPrefix", f"-Drewrite.configLocation={combined_config}"]
+    subprocess.run(args + combined_run, cwd=custom, check=True)
+    no_models = (custom / "schema-free" / INITIALIZER).read_text()
+    assert f'TRUSTED_PACKAGE_1 = "{explicit_package}";' in no_models
+    assert 'TRUSTED_PACKAGE_PREFIX_1 = "com.example.orders";' in no_models
+    assert 'TRUSTED_PACKAGE_PREFIX_2 = "com.example.payments";' in no_models
+    assert '"example.orders.avro"' not in no_models, "Test-only schema was trusted"
     initializer = (app / INITIALIZER).read_text()
+    for index, name in enumerate(sorted((namespace, second_namespace, explicit_package)), start=1):
+        assert f'TRUSTED_PACKAGE_{index} = "{name}";' in initializer
     assert 'TRUSTED_PACKAGE_PREFIX_1 = "com.example.orders";' in initializer
     assert 'TRUSTED_PACKAGE_PREFIX_2 = "com.example.payments";' in initializer
-    assert second_namespace not in initializer
     assert (app / FACTORIES).read_bytes() == registration
-    prefixed = snapshot(custom)
-    subprocess.run(args + prefix_run, cwd=custom, check=True)
-    assert snapshot(custom) == prefixed, "Repeat run changed the prefix initializer"
+    combined = snapshot(custom)
+    subprocess.run(args + combined_run, cwd=custom, check=True)
+    assert snapshot(custom) == combined, "Repeat run changed the combined initializer"
 
     test_java = app / "src/test/java"
     for package, name in (("com.example.orders", "RootPackage"), ("com.example.payments.events", "OtherPrefix"),
-                          ("com.example.ordersarchive.events", "SimilarPackage")):
+                          ("com.example.ordersarchive.events", "SimilarPackage"),
+                          (explicit_package, "ExplicitPackage"), (explicit_package + ".nested", "ExactSubpackage")):
         directory = test_java.joinpath(*package.split("."))
         directory.mkdir(parents=True)
         (directory / f"{name}.java").write_text(f"package {package}; public final class {name} {{}}\n")
@@ -215,7 +212,7 @@ recipeList:
     subprocess.run(args + ["-pl", "service", "clean", "verify"], cwd=custom, check=True)
     subprocess.run(args + options + [PLUGIN + ":runNoFork"], cwd=custom, check=True)
     assert hashlib.sha256((app / INITIALIZER).read_bytes()).digest() == before[Path("service") / INITIALIZER], \
-        "Exact recipe could not replace the prefix initializer"
+        "Recipe without explicit options could not replace the combined initializer"
     print("Verified direct discovery, exact and prefix package checks, idempotence, and Spring Boot/Avro runtime.")
 
 

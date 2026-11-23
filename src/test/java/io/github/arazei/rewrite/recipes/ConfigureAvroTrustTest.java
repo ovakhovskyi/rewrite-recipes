@@ -13,7 +13,8 @@ class ConfigureAvroTrustTest {
     void validatesExplicitPrefixSelection() {
         assertTrue(new ConfigureAvroTrust().validate().isValid());
         assertTrue(new ConfigureAvroTrust(null, List.of("com.example.orders", "com.example.payments")).validate().isValid());
-        assertFalse(new ConfigureAvroTrust("com.example.orders.events", List.of("com.example.orders")).validate().isValid());
+        assertTrue(new ConfigureAvroTrust("com.example.external.events", List.of("com.example.orders")).validate().isValid());
+        assertFalse(new ConfigureAvroTrust("com.example.external.*", List.of("com.example.orders")).validate().isValid());
     }
 
     @Test

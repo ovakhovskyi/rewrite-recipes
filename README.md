@@ -32,7 +32,7 @@ No additional `.avsc` mask is needed: if the plugin passes only the schema path,
 - Each Maven module is checked independently. The regular JAR `org.apache.avro:avro:1.12.2` must be present on the compile and runtime classpaths. Transitive dependencies and versions from dependency management are supported. Other versions, including 1.11.5 and 1.12.1, are skipped.
 - There must be exactly one top-level class annotated with `@SpringBootApplication` in `src/main/java`. Its name can be arbitrary. The base package is taken from the Java declaration.
 - The recipe searches for record, enum, and fixed definitions in `.avsc` files under `src/` in each module, including `src/avro`, `src/main/avro`, and arbitrary subdirectories. It also supports the production `sourceDirectory` configured in `avro-maven-plugin` and recognizes Java models annotated with `@AvroGenerated`. Trusted packages are derived from confirmed namespaces. The `src/test`, `src/it`, and `src/testFixtures` directories are excluded.
-- The result is `com.example.orders.config.AvroTrustInitializer` and its registration in `src/main/resources/META-INF/spring.factories`. By default, the initializer extends Avro's existing global predicate with exact package-match checks.
+- The result is `com.example.orders.config.AvroTrustInitializer` and its registration in `src/main/resources/META-INF/spring.factories`. The initializer extends Avro's existing global predicate with exact checks for all discovered model packages and any explicitly configured packages or prefixes.
 - Existing registrations and comments are preserved. For a previously generated class, the recipe updates the package list and restores the registration if needed. A different implementation in the target class, a duplicate initializer key, or an ambiguous application causes the module to be skipped. Comparisons with the expected source account for CRLF/LF differences and surrounding whitespace. Other user modifications are treated as conflicts.
 - Skip reasons are exported to the `ConfigureAvroTrust$Decisions` table in the plugin's report directory when `-Drewrite.exportDatatables=true` is set. The recipe project and target service use separate POM files. The recipe does not change the service's dependencies.
 
@@ -49,9 +49,9 @@ python3 src/it/verify.py --release 25
 
 The script creates a separate temporary Maven project and compares the contents of all source files before and after two recipe runs. In one service, Avro is a transitive dependency and `avro-maven-plugin` generates the model. The test starts Spring Boot 4.1.2, verifies both registrations, and decodes a binary event into the generated class, checking a field value. A second eligible module uses a different application package and a model annotated with `@AvroGenerated`. The remaining modules verify that the recipe skips old versions, unsupported scopes, dependencies declared only in dependency management, schemas found only in test directories, source conflicts, and modules with two application classes. An additional scenario runs the recipe without a mask in a Maven project nested inside a Git repository. It checks two namespaces (including one from a custom `sourceDirectory`), skips test and excluded schemas, and updates an existing initializer.
 
-## Explicit package selection
+## Adding trusted packages
 
-The main command automatically detects all packages. To select one of the detected packages, use the `trustedPackage` option through a declarative recipe, as shown in [the exact-package example](examples/avro-trust-exact-package.yml).
+The recipe always adds exact checks for discovered Avro model packages. To add another exact package, set `trustedPackage` in a declarative recipe, as shown in [the exact-package example](examples/avro-trust-exact-package.yml).
 
 To trust whole package hierarchies, run this from the root of the target project. Replace `/path/to/openrewrite` with the path to this repository:
 
@@ -62,6 +62,6 @@ mvn org.openrewrite.maven:rewrite-maven-plugin:6.25.0:dryRunNoFork \
   '-Drewrite.configLocation=/path/to/openrewrite/examples/avro-trust-prefixes.yml'
 ```
 
-The active recipe is the `name:` in [the YAML file](examples/avro-trust-prefixes.yml). That recipe calls the Java recipe with `trustedPackagePrefixes`. Set it to a non-empty list of Java package names (no wildcards or trailing dots). It cannot be combined with `trustedPackage`. To apply the changes, use `runNoFork` instead of `dryRunNoFork`.
+The active recipe is the `name:` in [the YAML file](examples/avro-trust-prefixes.yml). Set `trustedPackagePrefixes` to a non-empty list of Java package names (no wildcards or trailing dots). Both options can be set together under the same `ConfigureAvroTrust` entry. To apply the changes, use `runNoFork` instead of `dryRunNoFork`.
 
-A module must have at least one discovered production Avro model package under a configured prefix. Once it qualifies, the initializer trusts **all classes** under every configured prefix, including classes from dependencies and classes without `@AvroGenerated`.
+Explicit packages and prefixes are added even when the module has no discovered models, provided it meets the Spring Boot and Avro requirements above. A prefix trusts **all classes** in the named package and its subpackages, including classes from dependencies and classes without `@AvroGenerated`.

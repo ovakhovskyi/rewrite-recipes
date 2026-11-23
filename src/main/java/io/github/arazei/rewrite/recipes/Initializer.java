@@ -1,5 +1,6 @@
 package io.github.arazei.rewrite.recipes;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.StringJoiner;
 import java.util.regex.Pattern;
@@ -16,17 +17,26 @@ final class Initializer {
 
     private Initializer() {}
 
-    static String source(String base, List<String> modelPackages) {
-        return source(base, modelPackages, false);
-    }
-
-    static String prefixSource(String base, List<String> prefixes) {
-        return source(base, prefixes, true);
-    }
-
-    private static String source(String base, List<String> packages, boolean prefixes) {
+    static String source(String base, Collection<String> packages, List<String> prefixes) {
         StringBuilder constants = new StringBuilder();
         StringJoiner checks = new StringJoiner(OR);
+        appendChecks(constants, checks, packages, false);
+        appendChecks(constants, checks, prefixes, true);
+        checks.add("previous.isTrusted(type)");
+        String prefixMatcher = prefixes.isEmpty() ? "" : """
+
+                        private static boolean matchesPackage(String packageName, String prefix) {
+                            int length = prefix.length();
+                            return packageName.startsWith(prefix)
+                                    && (packageName.length() == length || packageName.charAt(length) == '.');
+                        }
+                """;
+        return render(base, constants.append('\n').toString(),
+                "            String packageName = type.getPackageName();\n", checks.toString(), prefixMatcher);
+    }
+
+    private static void appendChecks(StringBuilder constants, StringJoiner checks, Collection<String> packages,
+                                     boolean prefixes) {
         int index = 1;
         for (String name : packages) {
             String constant = (prefixes ? "TRUSTED_PACKAGE_PREFIX_" : "TRUSTED_PACKAGE_") + index++;
@@ -34,17 +44,6 @@ final class Initializer {
                     .append(" = \"").append(name).append("\";\n");
             checks.add(prefixes ? "matchesPackage(packageName, " + constant + ")" : constant + ".equals(packageName)");
         }
-        checks.add("previous.isTrusted(type)");
-        String prefixMatcher = prefixes ? """
-
-                        private static boolean matchesPackage(String packageName, String prefix) {
-                            int length = prefix.length();
-                            return packageName.startsWith(prefix)
-                                    && (packageName.length() == length || packageName.charAt(length) == '.');
-                        }
-                """ : "";
-        return render(base, constants.append('\n').toString(),
-                "            String packageName = type.getPackageName();\n", checks.toString(), prefixMatcher);
     }
 
     private static String legacySource(String base, List<String> modelPackages) {
@@ -87,12 +86,9 @@ final class Initializer {
 
     static boolean isGeneratedSource(String base, String candidate) {
         List<String> prefixes = packagesIn(candidate, PREFIX_CONSTANT);
-        if (!prefixes.isEmpty()) {
-            return candidate.equals(prefixSource(base, prefixes).strip());
-        }
         List<String> packages = packagesIn(candidate, PACKAGE_CONSTANT);
-        if (!packages.isEmpty()) {
-            return candidate.equals(source(base, packages).strip());
+        if (!packages.isEmpty() || !prefixes.isEmpty()) {
+            return candidate.equals(source(base, packages, prefixes).strip());
         }
         packages = packagesIn(candidate, LEGACY_PACKAGE_CHECK);
         return !packages.isEmpty() && candidate.equals(legacySource(base, packages).strip());

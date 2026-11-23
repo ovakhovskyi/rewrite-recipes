@@ -1,7 +1,7 @@
 type: specs.openrewrite.org/v1beta/recipe
 name: io.github.arazei.rewrite.recipes.ConfigureAvroTrustByPrefix
 displayName: Configure Avro trust by package prefix
-description: Trust the configured Java packages and their subpackages in modules with matching Avro models.
+description: Trust the configured Java packages and their subpackages alongside discovered Avro model packages.
 recipeList:
   - io.github.arazei.rewrite.recipes.ConfigureAvroTrust:
       trustedPackagePrefixes:

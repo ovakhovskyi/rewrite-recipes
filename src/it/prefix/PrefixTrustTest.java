@@ -1,5 +1,7 @@
 package example.orders;
 
+import com.example.external.events.ExplicitPackage;
+import com.example.external.events.nested.ExactSubpackage;
 import com.example.orders.RootPackage;
 import com.example.orders.events.avro.OrderEvent;
 import com.example.ordersarchive.events.SimilarPackage;
@@ -22,6 +24,8 @@ class PrefixTrustTest {
             assertTrue(trust.isTrusted(RootPackage.class));
             assertTrue(trust.isTrusted(OrderEvent.class));
             assertTrue(trust.isTrusted(OtherPrefix.class));
+            assertTrue(trust.isTrusted(ExplicitPackage.class));
+            assertFalse(trust.isTrusted(ExactSubpackage.class));
             assertFalse(trust.isTrusted(SimilarPackage.class));
             assertTrue(trust.isTrusted(String.class));
         } finally {
