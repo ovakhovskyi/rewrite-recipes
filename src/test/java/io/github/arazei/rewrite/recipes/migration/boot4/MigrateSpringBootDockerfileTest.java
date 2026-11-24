@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 
 class MigrateSpringBootDockerfileTest {
     private static final String IMAGE =
-            "harbor.shared.avalaunch.rbua/infra-resources/eclipse-temurin-base-image:21-jre-ubi10-minimal";
+            "harbor.shared.avalaunch.rbua/infra-resources/eclipse-temurin-base-image:25-jre-ubi10-minimal";
 
     @Test
     void replacesEveryStageImageRegardlessOfTheOriginalAndPreservesExistingInstructions() {
@@ -25,6 +25,9 @@ class MigrateSpringBootDockerfileTest {
                 from builder AS runtime
                 WORKDIR /srv
                 COPY --from=builder /tmp/example ./
+
+                FROM harbor.shared.avalaunch.rbua/infra-resources/eclipse-temurin-base-image:21-jre-ubi10-minimal AS legacy
+                WORKDIR /legacy
 
                 FROM scratch
                 ENTRYPOINT ["/bin/example"]
@@ -43,10 +46,13 @@ class MigrateSpringBootDockerfileTest {
                 WORKDIR /srv
                 COPY --from=builder /tmp/example ./
 
+                FROM %s AS legacy
+                WORKDIR /legacy
+
                 FROM %s
                 WORKDIR /app
                 ENTRYPOINT ["/bin/example"]
-                """.formatted(IMAGE, IMAGE, IMAGE), migrated.getText());
+                """.formatted(IMAGE, IMAGE, IMAGE, IMAGE), migrated.getText());
         assertSame(migrated, migrate(migrated));
     }
 

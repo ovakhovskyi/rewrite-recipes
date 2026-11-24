@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
 
 public final class MigrateSpringBootDockerfile extends Recipe {
     private static final String BASE_IMAGE =
-            "harbor.shared.avalaunch.rbua/infra-resources/eclipse-temurin-base-image:21-jre-ubi10-minimal";
+            "harbor.shared.avalaunch.rbua/infra-resources/eclipse-temurin-base-image:25-jre-ubi10-minimal";
     private static final Pattern LINE = Pattern.compile("([^\\r\\n]*)(\\r\\n|\\n|\\r|\\z)");
     private static final Pattern ESCAPE = Pattern.compile("(?i)^#[ \\t]*escape[ \\t]*=[ \\t]*([`\\\\])[ \\t]*$");
     private static final Pattern HEREDOC_START = Pattern.compile("(?i)^[ \\t]*(?:RUN|COPY|ADD)[ \\t]+(?:--\\S+[ \\t]+)*<<");
@@ -31,7 +31,7 @@ public final class MigrateSpringBootDockerfile extends Recipe {
 
     @Override
     public String getDescription() {
-        return "Set every FROM instruction to the corporate Java 21 image and add WORKDIR /app to stages without a WORKDIR.";
+        return "Set every FROM instruction to the corporate Java 25 image and add WORKDIR /app to stages without a WORKDIR.";
     }
 
     @Override
