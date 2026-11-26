@@ -28,6 +28,12 @@ class MigrateSpringBootLayeredDockerfileTest {
                 "--add-opens", "java.base/java.lang.invoke=ALL-UNNAMED",\\
                 "org.springframework.boot.loader.launch.JarLauncher"]
             """;
+    private static final String PARTIALLY_MIGRATED = LEGACY
+            .replace("FROM eclipse-temurin:25 AS compile", "FROM eclipse-temurin:25 as compile\nWORKDIR /app")
+            .replace("VOLUME /tmp", "VOLUME /tmp\nWORKDIR /app")
+            .replace("-Djarmode=layertools -jar app.jar extract",
+                    "-Djarmode=tools -jar app.jar extract --layers --destination extracted")
+            .replace("--from=compile /app/", "--from=compile /app/extracted/");
 
     @Test
     void migratesAllPartsTogetherAndPreservesFormattingAndOptions() {
@@ -52,6 +58,31 @@ class MigrateSpringBootLayeredDockerfileTest {
         PlainText migrated = migrate(dockerfile(LEGACY.stripTrailing().replace("\n", "\r\n")));
         assertEquals(expected.stripTrailing().replace("\n", "\r\n"), migrated.getText());
         assertSame(migrated, migrate(migrated));
+    }
+
+    @Test
+    void fixesOnlyTheEntrypointForAnAlreadyExtractedToolsLayout() {
+        String before = PARTIALLY_MIGRATED.stripTrailing() + " \r\n";
+        PlainText migrated = migrate(dockerfile(before));
+        assertEquals(before.replace("\"org.springframework.boot.loader.launch.JarLauncher\"", "\"-jar\", \"app.jar\""),
+                migrated.getText());
+        assertSame(migrated, migrate(migrated));
+
+        String custom = PARTIALLY_MIGRATED.replace("app.jar", "service.jar").replace("extracted", "boot-layers");
+        assertEquals(custom.replace("\"org.springframework.boot.loader.launch.JarLauncher\"", "\"-jar\", \"service.jar\""),
+                migrate(dockerfile(custom)).getText());
+    }
+
+    @Test
+    void skipsToolsLayoutsWithMissingOrMismatchedLayers() {
+        for (String text : new String[]{
+                PARTIALLY_MIGRATED.replace("COPY --from=compile /app/extracted/application/ ./\n", ""),
+                PARTIALLY_MIGRATED.replace("/app/extracted/application/", "/app/elsewhere/application/"),
+                PARTIALLY_MIGRATED.replace("--from=compile /app/extracted/application/", "--from=other /app/extracted/application/"),
+                PARTIALLY_MIGRATED.replace("--destination extracted", "--destination extracted --launcher")}) {
+            PlainText input = dockerfile(text);
+            assertSame(input, migrate(input));
+        }
     }
 
     @Test

@@ -23,7 +23,11 @@ public final class MigrateSpringBootLayeredDockerfile extends Recipe {
     private static final Pattern ALIAS = Pattern.compile("(?i)\\bAS[ \\t]+([\\w.-]+)[ \\t]*$");
     private static final Pattern JAR_COPY = Pattern.compile("(?i:^[ \\t]*COPY)[ \\t]+\\$\\{JAR_FILE}[ \\t]+(app\\.jar)[ \\t]*");
     private static final Pattern EXTRACT = Pattern.compile("(?i:^[ \\t]*RUN)[ \\t]+(java[ \\t]+-Djarmode=layertools[ \\t]+-jar[ \\t]+app\\.jar[ \\t]+extract)[ \\t]*");
+    private static final Pattern TOOLS_EXTRACT = Pattern.compile("(?i:^[ \\t]*RUN)[ \\t]+java[ \\t]+-Djarmode=tools[ \\t]+-jar[ \\t]+" +
+            "([\\w.-]+\\.jar)[ \\t]+extract[ \\t]+--layers[ \\t]+--destination[ \\t]+([\\w-][\\w.-]*)/?[ \\t]*");
     private static final Pattern LAYER_COPY = Pattern.compile("(?i:^[ \\t]*COPY)[ \\t]+--from=([\\w.-]+)[ \\t]+(/app/)(dependencies|spring-boot-loader|snapshot-dependencies|application)/[ \\t]+\\./[ \\t]*");
+    private static final Pattern STANDARD_LAYER_COPY = Pattern.compile("(?i:^[ \\t]*COPY)[ \\t]+--from=([\\w.-]+)[ \\t]+" +
+            "(/app/(?:[\\w.-]+/)?)(dependencies|spring-boot-loader|snapshot-dependencies|application)/[ \\t]+\\./[ \\t]*");
     private static final Pattern COPY_FROM = Pattern.compile("(?i:^[ \\t]*COPY\\b).*?--from=([\\w.-]+)(?=\\s)", Pattern.DOTALL);
     private static final Pattern OLD_LAYER_PATH = Pattern.compile("/app/(?:dependencies|spring-boot-loader|snapshot-dependencies|application)(?=/|[\"\\s]|$)");
     private static final Pattern WORKDIR = Pattern.compile("(?i)^[ \\t]*WORKDIR[ \\t]+");
@@ -36,7 +40,7 @@ public final class MigrateSpringBootLayeredDockerfile extends Recipe {
 
     @Override
     public String getDescription() {
-        return "Migrate the matching builder extraction, four layer copies and runtime entrypoint together, retaining existing JVM arguments.";
+        return "Migrate matching layered Dockerfiles to tools, including fixing runtime entrypoints for existing tools layouts, while retaining JVM arguments.";
     }
 
     @Override
@@ -79,6 +83,7 @@ public final class MigrateSpringBootLayeredDockerfile extends Recipe {
             Edit extract = singleEdit(builder, EXTRACT,
                     "java -Djarmode=tools -jar application.jar extract --layers --destination extracted");
             if (jar == null || extract == null || jar.start() >= extract.start() || !usesAppWorkdir(builder, jar.start())) {
+                edits.addAll(toolsEntrypoints(builder, stages.subList(i + 1, stages.size())));
                 continue;
             }
 
@@ -105,7 +110,7 @@ public final class MigrateSpringBootLayeredDockerfile extends Recipe {
                     break;
                 }
                 if (!layerCopies.isEmpty()) {
-                    Edit launch = entrypoint(runtime);
+                    Edit launch = entrypoint(runtime, "application.jar");
                     if (layers.size() != 4 || layerCopies.size() != 4 || launch == null ||
                             !usesAppWorkdir(runtime, layerCopies.getFirst().start())) {
                         complete = false;
@@ -130,6 +135,47 @@ public final class MigrateSpringBootLayeredDockerfile extends Recipe {
         return updated.toString();
     }
 
+    private static List<Edit> toolsEntrypoints(Stage builder, List<Stage> runtimes) {
+        Matcher extract = null;
+        for (var instruction : builder.body()) {
+            Matcher match = TOOLS_EXTRACT.matcher(instruction.text());
+            if (match.matches()) {
+                if (extract != null || !usesAppWorkdir(builder, instruction.start())) {
+                    return List.of();
+                }
+                extract = match;
+            }
+        }
+        if (extract == null) {
+            return List.of();
+        }
+
+        String jar = extract.group(1);
+        String directory = "/app/" + extract.group(2) + "/";
+        List<Edit> edits = new ArrayList<>();
+        for (Stage runtime : runtimes) {
+            Edit launch = entrypoint(runtime, jar);
+            if (launch == null) {
+                continue;
+            }
+            Set<String> layers = new HashSet<>();
+            boolean matches = true;
+            for (var instruction : runtime.body()) {
+                Matcher copy = STANDARD_LAYER_COPY.matcher(instruction.text());
+                if (copy.matches() && (!builder.alias().equalsIgnoreCase(copy.group(1)) ||
+                        !directory.equals(copy.group(2)) || !usesAppWorkdir(runtime, instruction.start()) ||
+                        !layers.add(copy.group(3)))) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches && layers.size() == 4) {
+                edits.add(launch);
+            }
+        }
+        return edits;
+    }
+
     private static boolean usesAppWorkdir(Stage stage, int before) {
         var workdirs = stage.body().stream().filter(instruction -> WORKDIR.matcher(instruction.text()).find()).toList();
         return workdirs.isEmpty() || (workdirs.size() == 1 && workdirs.getFirst().start() < before &&
@@ -150,7 +196,7 @@ public final class MigrateSpringBootLayeredDockerfile extends Recipe {
         return result;
     }
 
-    private static Edit entrypoint(Stage stage) {
+    private static Edit entrypoint(Stage stage, String jar) {
         var entries = stage.body().stream().filter(instruction -> ENTRYPOINT.matcher(instruction.text()).find()).toList();
         if (entries.size() != 1) {
             return null;
@@ -161,7 +207,7 @@ public final class MigrateSpringBootLayeredDockerfile extends Recipe {
         Matcher match = Pattern.compile("(?i:^[ \\t]*ENTRYPOINT)" + space + "\\[" + space + "\"java\"" + space + "," + space +
                 "(?:" + argument + space + "," + space + ")*(\"org\\.springframework\\.boot\\.loader\\.launch\\.JarLauncher\")" +
                 space + "\\][ \\t]*").matcher(instruction.text());
-        return match.matches() ? edit(instruction, match, 1, "\"-jar\", \"application.jar\"") : null;
+        return match.matches() ? edit(instruction, match, 1, "\"-jar\", \"" + jar + "\"") : null;
     }
 
     private static Edit edit(MigrateSpringBootDockerfile.Instruction instruction, Matcher match, int group, String replacement) {
