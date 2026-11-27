@@ -1,10 +1,11 @@
 type: specs.openrewrite.org/v1beta/recipe
 name: io.github.arazei.rewrite.recipes.UpgradeToJava25AndSpringBoot4
 displayName: Migrate to Java 25 and Spring Boot 4 with Avro trust
-description: Upgrade Maven services to Java 25 and Spring Boot 4.1.x, migrate Jackson, OpenAPI Generator, Testcontainers, MyRaif dependencies and Java API types, and the company Dockerfile, exclude transitive Resilience4j Boot 3 integration, and configure package trust in modules using Avro 1.12.2.
+description: Upgrade Maven services to Java 25 and Spring Boot 4.1.x, migrate Jackson, Spring Kafka, OpenAPI Generator, Testcontainers, MyRaif dependencies and Java API types, and the company Dockerfile, exclude transitive Resilience4j Boot 3 integration, and configure package trust in modules using Avro 1.12.2.
 recipeList:
   - org.openrewrite.java.migrate.UpgradeToJava25
   - io.arconia.rewrite.spring.boot4.UpgradeSpringBoot_4_1
+  - org.openrewrite.java.spring.kafka.UpgradeSpringKafka_4_0
   - org.openrewrite.java.spring.boot4.MigrateOpenApiGeneratorToSpringBoot4
   - org.openrewrite.java.testing.testcontainers.Testcontainers2Migration
   - io.github.arazei.rewrite.recipes.migration.boot4.MigrateCompanyDependencies

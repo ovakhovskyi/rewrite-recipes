@@ -44,6 +44,8 @@ mvn -s settings.xml -U \
 
 Review `target/rewrite/rewrite.patch`, replace `:dryRun` with `:run`, then verify with `mvn -s settings.xml verify`. The composite does not upgrade Avro itself. If the trust changes are missing because the module did not yet resolve Avro 1.12.2, rerun after the module resolves that version on both production classpaths.
 
+The composite runs OpenRewrite's Spring Kafka 4 migration. It replaces fully qualified Spring Kafka class names such as `JsonSerializer` and `JsonDeserializer` with their `JacksonJson*` equivalents in Java code and in Spring Boot configuration values, including `json-producer.value-serializer` in `application.yml`.
+
 The composite uses the resolved Maven dependency tree to exclude `io.github.resilience4j:resilience4j-spring-boot3` from the direct dependencies that bring it in transitively. Verify the result with `mvn -s settings.xml dependency:tree -Dincludes=io.github.resilience4j:resilience4j-spring-boot3`. With Spring Cloud Circuit Breaker 5.0.x, the exclusion can prevent startup if the service relies on that module to provide beans such as `CircuitBreakerRegistry`. Ensure the service has compatible Resilience4j configuration and verify that it starts.
 
 For Testcontainers, check any `DockerComposeContainer` replacements: the recipe can leave `<?>` or constructor `<>` on `ComposeContainer`, which is not generic. Remove those type arguments if present.
